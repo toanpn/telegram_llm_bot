@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build: .
+    container_name: telegram_llm_bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BOT_USERNAME=${BOT_USERNAME}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+      - DATABASE_URL=sqlite:///data/bot_data.db
+      - DEFAULT_TEMPERATURE=${DEFAULT_TEMPERATURE:-0.7}
+      - DEFAULT_TONE=${DEFAULT_TONE:-friendly}
+      - CONTEXT_MESSAGES_COUNT=${CONTEXT_MESSAGES_COUNT:-7}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      # Persistent database storage
+      - bot_data:/app/data
+      # Optional: Mount logs directory
+      - bot_logs:/app/logs
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sqlite3; sqlite3.connect('/app/data/bot_data.db').close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Named volume for persistent database storage
+  bot_data:
+    driver: local
+  # Named volume for logs
+  bot_logs:
+    driver: local
+
+networks:
+  bot_network:
+    driver: bridge 

@@ -1,0 +1,9 @@
+python-telegram-bot==21.0
+google-generativeai==0.3.2
+python-dotenv==1.0.0
+asyncio==3.4.3
+aiofiles==23.2.1
+sqlalchemy==2.0.23
+aiosqlite==0.19.0
+pydantic==2.5.2
+loguru==0.7.2 
