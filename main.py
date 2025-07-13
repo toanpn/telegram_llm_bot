@@ -529,14 +529,24 @@ class TelegramBot:
             logger.error(f"Error updating setting: {e}")
             await query.edit_message_text("❌ Error updating setting. Please try again.")
     
-    async def run(self):
+    def run(self):
         """Run the bot."""
-        await self.initialize()
+        # Create event loop for the main thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        logger.info("Starting bot...")
-        await self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        try:
+            # Initialize the bot
+            loop.run_until_complete(self.initialize())
+            
+            logger.info("Starting bot...")
+            # Use the synchronous run_polling method
+            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        finally:
+            # Clean up the loop
+            loop.close()
 
-async def main():
+def main():
     """Main function to run the bot."""
     # Configure logging
     logging.basicConfig(
@@ -546,7 +556,13 @@ async def main():
     
     # Create and run bot
     bot = TelegramBot()
-    await bot.run()
+    bot.run()
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+        raise 
