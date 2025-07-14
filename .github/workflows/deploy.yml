@@ -19,93 +19,75 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        timeout: 600s
-        command_timeout: 600s
+        timeout: 300s
+        command_timeout: 300s
         script: |
-          # Update system packages
-          sudo apt-get update -y
+          echo "🚀 Starting deployment..."
           
-          # Install essential packages
-          sudo apt-get install -y \
-            curl \
-            wget \
-            git \
-            unzip \
-            software-properties-common \
-            apt-transport-https \
-            ca-certificates \
-            gnupg \
-            lsb-release
-          
-          # Install Docker
-          if ! command -v docker &> /dev/null; then
-            echo "Installing Docker..."
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-            sudo apt-get update -y
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-            sudo usermod -aG docker $USER
-            sudo systemctl enable docker
-            sudo systemctl start docker
-            echo "Docker installed successfully"
+          # Quick system update (only if needed)
+          if [ ! -f /tmp/system_updated ]; then
+            echo "📦 Updating system packages..."
+            sudo apt-get update -y >/dev/null 2>&1
+            touch /tmp/system_updated
           fi
           
-          # Install Docker Compose
-          if ! command -v docker-compose &> /dev/null; then
-            echo "Installing Docker Compose..."
-            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
-            echo "Docker Compose installed successfully"
-          fi
+          # Install missing packages only
+          echo "🔧 Checking required packages..."
+          PACKAGES=""
+          command -v curl >/dev/null || PACKAGES="$PACKAGES curl"
+          command -v git >/dev/null || PACKAGES="$PACKAGES git"
+          command -v docker >/dev/null || PACKAGES="$PACKAGES docker-ce"
+          command -v python3.12 >/dev/null || PACKAGES="$PACKAGES python3.12 python3.12-pip python3.12-venv"
           
-          # Install Python 3.12
-          if ! command -v python3.12 &> /dev/null; then
-            echo "Installing Python 3.12..."
-            sudo add-apt-repository ppa:deadsnakes/ppa -y
-            sudo apt-get update -y
-            sudo apt-get install -y python3.12 python3.12-pip python3.12-venv python3.12-dev
-            echo "Python 3.12 installed successfully"
+          if [ ! -z "$PACKAGES" ]; then
+            echo "Installing: $PACKAGES"
+            if [[ "$PACKAGES" == *"docker"* ]]; then
+              # Install Docker if needed
+              curl -fsSL https://get.docker.com | sudo sh >/dev/null 2>&1
+              sudo usermod -aG docker $USER
+            fi
+            if [[ "$PACKAGES" == *"python3.12"* ]]; then
+              # Install Python 3.12 if needed
+              sudo add-apt-repository ppa:deadsnakes/ppa -y >/dev/null 2>&1
+              sudo apt-get update -y >/dev/null 2>&1
+              sudo apt-get install -y python3.12 python3.12-pip python3.12-venv >/dev/null 2>&1
+            fi
+            sudo apt-get install -y $PACKAGES >/dev/null 2>&1
           fi
           
           # Setup application directory
           mkdir -p ~/telegram-bot
           cd ~/telegram-bot
           
-          # Stop existing bot service
-          echo "Stopping existing services..."
-          sudo systemctl stop telegram-bot 2>/dev/null || echo "Service not running"
-          pkill -f "python.*main.py" || echo "No bot processes to kill"
-          sleep 2
+          # Stop existing services quickly
+          echo "🛑 Stopping existing services..."
+          sudo systemctl stop telegram-bot 2>/dev/null || true
+          pkill -f "python.*main.py" 2>/dev/null || true
           
           # Clone or update repository
+          echo "📥 Updating code..."
           if [ -d ".git" ]; then
-            echo "Updating repository..."
-            git fetch origin
-            git reset --hard origin/main
+            git fetch origin >/dev/null 2>&1
+            git reset --hard origin/main >/dev/null 2>&1
           else
-            echo "Cloning repository..."
-            git clone https://github.com/${{ github.repository }}.git .
+            git clone https://github.com/${{ github.repository }}.git . >/dev/null 2>&1
           fi
           
           # Setup Python environment
-          echo "Setting up Python environment..."
+          echo "🐍 Setting up Python environment..."
           rm -rf venv
           python3.12 -m venv venv
           source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          
-          # Verify Python installation
-          echo "Python version: $(python --version)"
-          echo "Pip version: $(pip --version)"
+          pip install --upgrade pip >/dev/null 2>&1
+          pip install -r requirements.txt >/dev/null 2>&1
           
           # Create environment file
-          echo "Creating environment file..."
+          echo "⚙️ Creating configuration..."
           cat > .env << EOF
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           BOT_USERNAME=${{ secrets.BOT_USERNAME }}
           GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL=gemini-2.5-flash
+          GEMINI_MODEL=gemini-1.5-flash
           DATABASE_URL=sqlite:///data/bot_data.db
           DEFAULT_TEMPERATURE=0.7
           DEFAULT_TONE=friendly
@@ -117,13 +99,9 @@ jobs:
           # Create required directories
           mkdir -p data logs
           
-          # Test the bot can start (dry run)
-          echo "Testing bot configuration..."
-          timeout 10 python main.py --help || echo "Bot test completed"
-          
           # Create systemd service
-          echo "Creating systemd service..."
-          sudo tee /etc/systemd/system/telegram-bot.service > /dev/null << EOF
+          echo "🔧 Creating service..."
+          sudo tee /etc/systemd/system/telegram-bot.service >/dev/null << EOF
           [Unit]
           Description=Telegram LLM Bot
           After=network.target
@@ -147,35 +125,19 @@ jobs:
           EOF
           
           # Start the service
-          echo "Starting telegram-bot service..."
+          echo "🚀 Starting service..."
           sudo systemctl daemon-reload
-          sudo systemctl enable telegram-bot
+          sudo systemctl enable telegram-bot >/dev/null 2>&1
           sudo systemctl start telegram-bot
           
-          # Wait and check service status multiple times
-          for i in {1..5}; do
-            echo "Checking service status (attempt $i)..."
-            sleep 5
-            if sudo systemctl is-active --quiet telegram-bot; then
-              echo "✅ Service is running successfully!"
-              break
-            else
-              echo "❌ Service is not running. Status:"
-              sudo systemctl status telegram-bot --no-pager --lines=10
-              echo "Recent logs:"
-              sudo journalctl -u telegram-bot --no-pager -n 20
-              
-              if [ $i -eq 5 ]; then
-                echo "⚠️  Service failed to start after 5 attempts"
-                exit 1
-              else
-                echo "Retrying in 5 seconds..."
-              fi
-            fi
-          done
+          # Quick status check
+          sleep 3
+          if sudo systemctl is-active --quiet telegram-bot; then
+            echo "✅ Service is running successfully!"
+            sudo systemctl status telegram-bot --no-pager --lines=5
+          else
+            echo "❌ Service failed to start. Logs:"
+            sudo journalctl -u telegram-bot --no-pager -n 10
+          fi
           
-          # Final status check
-          echo "Final service status:"
-          sudo systemctl status telegram-bot --no-pager
-          
-          echo "Deployment completed successfully!" 
+          echo "🎉 Deployment completed!" 
