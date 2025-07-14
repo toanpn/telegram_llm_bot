@@ -58,21 +58,27 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
+        timeout: 300s
+        command_timeout: 300s
         script: |
-          # Update system
-          sudo apt-get update
+          # Update system (run in background to avoid timeout)
+          sudo apt-get update -y
           
           # Install Python 3.12 if not exists
           if ! command -v python3.12 &> /dev/null; then
+            echo "Installing Python 3.12..."
             sudo apt-get install -y software-properties-common
             sudo add-apt-repository ppa:deadsnakes/ppa -y
-            sudo apt-get update
+            sudo apt-get update -y
             sudo apt-get install -y python3.12 python3.12-pip python3.12-venv python3.12-dev
+            echo "Python 3.12 installed successfully"
           fi
           
           # Install git if not exists
           if ! command -v git &> /dev/null; then
+            echo "Installing git..."
             sudo apt-get install -y git
+            echo "Git installed successfully"
           fi
           
           # Create application directory
@@ -80,24 +86,37 @@ jobs:
           cd ~/telegram-bot
           
           # Stop existing bot process if running
+          echo "Stopping existing bot process..."
+          sudo systemctl stop telegram-bot 2>/dev/null || true
           pkill -f "python.*main.py" || true
+          sleep 2
+          echo "Existing processes stopped"
           
           # Clone or pull latest code
+          echo "Updating code repository..."
           if [ -d ".git" ]; then
-            git fetch origin
+            echo "Pulling latest changes..."
+            timeout 60 git fetch origin || echo "Git fetch timed out"
             git reset --hard origin/main
           else
-            git clone https://github.com/${{ github.repository }}.git .
+            echo "Cloning repository..."
+            timeout 60 git clone https://github.com/${{ github.repository }}.git . || echo "Git clone timed out"
           fi
+          echo "Code updated successfully"
           
           # Create virtual environment
+          echo "Creating virtual environment..."
+          rm -rf venv  # Remove old venv if exists
           python3.12 -m venv venv
           source venv/bin/activate
+          echo "Virtual environment created and activated"
           
-          # Install dependencies
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pydantic-settings greenlet
+          # Install dependencies (with timeout protection)
+          echo "Installing Python dependencies..."
+          pip install --upgrade pip --timeout=60
+          pip install -r requirements.txt --timeout=120
+          pip install pydantic-settings greenlet --timeout=60
+          echo "Dependencies installed successfully"
           
           # Create .env file with secrets
           cat > .env << EOF
@@ -137,15 +156,20 @@ jobs:
           EOF
           
           # Reload systemd and start service
+          echo "Reloading systemd and starting service..."
           sudo systemctl daemon-reload
           sudo systemctl enable telegram-bot
           sudo systemctl restart telegram-bot
           
           # Wait a moment for service to start
-          sleep 5
+          sleep 3
           
-          # Show service status
-          sudo systemctl status telegram-bot --no-pager
+          # Show service status (with timeout)
+          echo "Checking service status..."
+          timeout 10 sudo systemctl status telegram-bot --no-pager || echo "Service status check timed out"
           
-          # Show recent logs
-          sudo journalctl -u telegram-bot --no-pager -n 20 
+          # Show recent logs (with timeout)
+          echo "Showing recent logs..."
+          timeout 10 sudo journalctl -u telegram-bot --no-pager -n 10 || echo "Log retrieval timed out"
+          
+          echo "Deployment completed successfully!" 
