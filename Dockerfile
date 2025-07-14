@@ -34,8 +34,8 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python3 -c "import requests; requests.get('https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python3 -c "import sqlite3; sqlite3.connect('/app/data/bot_data.db').close()" || exit 1
 
 # Run the bot
 CMD ["python3", "main.py"] 

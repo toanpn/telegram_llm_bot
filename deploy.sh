@@ -165,7 +165,7 @@ cat > .env << ENVEOF
 TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 BOT_USERNAME=$BOT_USERNAME
 GOOGLE_API_KEY=$GOOGLE_API_KEY
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 DATABASE_URL=sqlite:///data/bot_data.db
 DEFAULT_TEMPERATURE=0.7
 DEFAULT_TONE=friendly
@@ -187,7 +187,7 @@ services:
       - TELEGRAM_BOT_TOKEN=\\\${TELEGRAM_BOT_TOKEN}
       - BOT_USERNAME=\\\${BOT_USERNAME}
       - GOOGLE_API_KEY=\\\${GOOGLE_API_KEY}
-      - GEMINI_MODEL=\\\${GEMINI_MODEL:-gemini-1.5-flash}
+      - GEMINI_MODEL=\\\${GEMINI_MODEL:-gemini-2.5-flash}
       - DATABASE_URL=sqlite:///data/bot_data.db
       - DEFAULT_TEMPERATURE=\\\${DEFAULT_TEMPERATURE:-0.7}
       - DEFAULT_TONE=\\\${DEFAULT_TONE:-friendly}

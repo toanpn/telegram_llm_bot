@@ -87,7 +87,7 @@ jobs:
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           BOT_USERNAME=${{ secrets.BOT_USERNAME }}
           GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL=gemini-1.5-flash
+          GEMINI_MODEL=gemini-2.5-flash
           DATABASE_URL=sqlite:///data/bot_data.db
           DEFAULT_TEMPERATURE=0.7
           DEFAULT_TONE=friendly

@@ -13,7 +13,7 @@ BOT_USERNAME=your_bot_username_here
 
 # Google Gemini AI Configuration
 GOOGLE_API_KEY=your_google_gemini_api_key_here
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 
 # Database Configuration
 DATABASE_URL=sqlite:///data/bot_data.db

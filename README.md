@@ -90,7 +90,7 @@ Create a `.env` file with your settings:
 TELEGRAM_BOT_TOKEN=your_telegram_token
 BOT_USERNAME=your_bot_username
 GOOGLE_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 DEFAULT_TONE=friendly
 ```
 
@@ -105,7 +105,7 @@ DEFAULT_TONE=friendly
 ## Technical Details
 
 - **Language**: Python 3.12
-- **AI**: Google Gemini 1.5 Flash
+- **AI**: Google Gemini 2.5 Flash
 - **Database**: SQLite with automatic persistence
 - **Security**: Non-root container, environment variables, health checks
 - **Architecture**: Async/await for performance, modular design

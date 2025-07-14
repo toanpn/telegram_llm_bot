@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -598,7 +599,7 @@ class TelegramBot:
             "💼 **Chuyên nghiệp**: Lịch sự, trang trọng, dùng \"anh/chị\"\n"
             "😄 **Hài hước**: Vui vẻ, hay đùa, dùng meme, emoji nhiều\n"
             "🎩 **Nghiêm túc**: Trang trọng, ít đùa, tập trung vào vấn đề\n"
-            "💖 **Nịnh nọt**: Khen ngợi, gọi \"ông chủ/bà chủ/ngài\", xưng \"em nhỏ\"\n"
+            "💖 **Nịnh nọt**: Khen ngợi, gọi \"ông chủ/bà chủ/ngài\", xưng \"nô tỳ\"\n"
             "👥 **Thoải mái**: Bình dân, dùng \"m/t\", \"bro\", \"chị em\"\n"
             "📋 **Hiền triết**: Sâu sắc, triết lý, dùng thành ngữ, tục ngữ",
             reply_markup=reply_markup,
@@ -687,24 +688,25 @@ class TelegramBot:
             logger.error(f"Error updating setting: {e}")
             await query.edit_message_text("❌ Lỗi khi cập nhật cài đặt. Vui lòng thử lại.")
     
-    def run(self):
+    async def run(self):
         """Run the bot."""
-        # Create event loop for the main thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
         try:
             # Initialize the bot
-            loop.run_until_complete(self.initialize())
+            await self.initialize()
             
             logger.info("Starting bot...")
-            # Use the synchronous run_polling method
-            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+            # Use the asynchronous run_polling method
+            await self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        except Exception as e:
+            logger.error(f"Error running bot: {e}")
+            raise
         finally:
-            # Clean up the loop
-            loop.close()
+            # Ensure proper cleanup
+            if self.application.running:
+                await self.application.stop()
+                await self.application.shutdown()
 
-def main():
+async def main():
     """Main function to run the bot."""
     # Configure logging
     logging.basicConfig(
@@ -712,13 +714,41 @@ def main():
         level=getattr(logging, config.log_level.upper())
     )
     
-    # Create and run bot
+    # Create bot instance
     bot = TelegramBot()
-    bot.run()
+    
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        # Create a task to stop the bot
+        asyncio.create_task(shutdown_bot(bot))
+    
+    # Setup signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        # Run bot
+        await bot.run()
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+        raise
+    finally:
+        logger.info("Bot shutdown complete")
+
+async def shutdown_bot(bot):
+    """Gracefully shutdown the bot."""
+    try:
+        if bot.application and bot.application.running:
+            await bot.application.stop()
+            await bot.application.shutdown()
+            logger.info("Bot stopped successfully")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 if __name__ == "__main__":
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
