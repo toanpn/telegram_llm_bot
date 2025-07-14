@@ -72,8 +72,10 @@ jobs:
           cd ~/telegram-bot
           
           # Stop existing bot service
+          echo "Stopping existing services..."
           sudo systemctl stop telegram-bot 2>/dev/null || echo "Service not running"
           pkill -f "python.*main.py" || echo "No bot processes to kill"
+          sleep 2
           
           # Clone or update repository
           if [ -d ".git" ]; then
@@ -86,18 +88,24 @@ jobs:
           fi
           
           # Setup Python environment
+          echo "Setting up Python environment..."
           rm -rf venv
           python3.12 -m venv venv
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
           
+          # Verify Python installation
+          echo "Python version: $(python --version)"
+          echo "Pip version: $(pip --version)"
+          
           # Create environment file
+          echo "Creating environment file..."
           cat > .env << EOF
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           BOT_USERNAME=${{ secrets.BOT_USERNAME }}
           GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL=gemini-1.5-flash
+          GEMINI_MODEL=gemini-2.5-flash
           DATABASE_URL=sqlite:///data/bot_data.db
           DEFAULT_TEMPERATURE=0.7
           DEFAULT_TONE=friendly
@@ -109,7 +117,12 @@ jobs:
           # Create required directories
           mkdir -p data logs
           
+          # Test the bot can start (dry run)
+          echo "Testing bot configuration..."
+          timeout 10 python main.py --help || echo "Bot test completed"
+          
           # Create systemd service
+          echo "Creating systemd service..."
           sudo tee /etc/systemd/system/telegram-bot.service > /dev/null << EOF
           [Unit]
           Description=Telegram LLM Bot
@@ -122,21 +135,47 @@ jobs:
           Environment=PATH=/home/$USER/telegram-bot/venv/bin
           ExecStart=/home/$USER/telegram-bot/venv/bin/python main.py
           Restart=always
-          RestartSec=5
+          RestartSec=10
           StandardOutput=journal
           StandardError=journal
+          KillMode=mixed
+          KillSignal=SIGINT
+          TimeoutStopSec=30
           
           [Install]
           WantedBy=multi-user.target
           EOF
           
           # Start the service
+          echo "Starting telegram-bot service..."
           sudo systemctl daemon-reload
           sudo systemctl enable telegram-bot
           sudo systemctl start telegram-bot
           
-          # Check service status
-          sleep 5
+          # Wait and check service status multiple times
+          for i in {1..5}; do
+            echo "Checking service status (attempt $i)..."
+            sleep 5
+            if sudo systemctl is-active --quiet telegram-bot; then
+              echo "✅ Service is running successfully!"
+              break
+            else
+              echo "❌ Service is not running. Status:"
+              sudo systemctl status telegram-bot --no-pager --lines=10
+              echo "Recent logs:"
+              sudo journalctl -u telegram-bot --no-pager -n 20
+              
+              if [ $i -eq 5 ]; then
+                echo "⚠️  Service failed to start after 5 attempts"
+                exit 1
+              else
+                echo "Retrying in 5 seconds..."
+              fi
+            fi
+          done
+          
+          # Final status check
+          echo "Final service status:"
           sudo systemctl status telegram-bot --no-pager
           
           echo "Deployment completed successfully!" 
