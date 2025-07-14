@@ -1,143 +1,55 @@
-name: Deploy Telegram Bot to AWS EC2
+name: Simple Deploy
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Deploy to AWS EC2
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        timeout: 300s
-        command_timeout: 300s
-        script: |
-          echo "🚀 Starting deployment..."
-          
-          # Quick system update (only if needed)
-          if [ ! -f /tmp/system_updated ]; then
-            echo "📦 Updating system packages..."
-            sudo apt-get update -y >/dev/null 2>&1
-            touch /tmp/system_updated
-          fi
-          
-          # Install missing packages only
-          echo "🔧 Checking required packages..."
-          PACKAGES=""
-          command -v curl >/dev/null || PACKAGES="$PACKAGES curl"
-          command -v git >/dev/null || PACKAGES="$PACKAGES git"
-          command -v docker >/dev/null || PACKAGES="$PACKAGES docker-ce"
-          command -v python3.12 >/dev/null || PACKAGES="$PACKAGES python3.12 python3.12-pip python3.12-venv"
-          
-          if [ ! -z "$PACKAGES" ]; then
-            echo "Installing: $PACKAGES"
-            if [[ "$PACKAGES" == *"docker"* ]]; then
-              # Install Docker if needed
-              curl -fsSL https://get.docker.com | sudo sh >/dev/null 2>&1
-              sudo usermod -aG docker $USER
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            # Directory where the application should live
+            APP_DIR=~/telegram-bot
+
+            # Clone repo if it does not exist yet
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone https://github.com/${{ github.repository }} "$APP_DIR"
             fi
-            if [[ "$PACKAGES" == *"python3.12"* ]]; then
-              # Install Python 3.12 if needed
-              sudo add-apt-repository ppa:deadsnakes/ppa -y >/dev/null 2>&1
-              sudo apt-get update -y >/dev/null 2>&1
-              sudo apt-get install -y python3.12 python3.12-pip python3.12-venv >/dev/null 2>&1
-            fi
-            sudo apt-get install -y $PACKAGES >/dev/null 2>&1
-          fi
-          
-          # Setup application directory
-          mkdir -p ~/telegram-bot
-          cd ~/telegram-bot
-          
-          # Stop existing services quickly
-          echo "🛑 Stopping existing services..."
-          sudo systemctl stop telegram-bot 2>/dev/null || true
-          pkill -f "python.*main.py" 2>/dev/null || true
-          
-          # Clone or update repository
-          echo "📥 Updating code..."
-          if [ -d ".git" ]; then
-            git fetch origin >/dev/null 2>&1
-            git reset --hard origin/main >/dev/null 2>&1
-          else
-            git clone https://github.com/${{ github.repository }}.git . >/dev/null 2>&1
-          fi
-          
-          # Setup Python environment
-          echo "🐍 Setting up Python environment..."
-          rm -rf venv
-          python3.12 -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip >/dev/null 2>&1
-          pip install -r requirements.txt >/dev/null 2>&1
-          
-          # Create environment file
-          echo "⚙️ Creating configuration..."
-          cat > .env << EOF
-          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-          BOT_USERNAME=${{ secrets.BOT_USERNAME }}
-          GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL=gemini-2.5-flash
-          DATABASE_URL=sqlite:///data/bot_data.db
-          DEFAULT_TEMPERATURE=0.7
-          DEFAULT_TONE=friendly
-          CONTEXT_MESSAGES_COUNT=7
-          DEBUG=false
-          LOG_LEVEL=INFO
-          EOF
-          
-          # Create required directories
-          mkdir -p data logs
-          
-          # Create systemd service
-          echo "🔧 Creating service..."
-          sudo tee /etc/systemd/system/telegram-bot.service >/dev/null << EOF
-          [Unit]
-          Description=Telegram LLM Bot
-          After=network.target
-          
-          [Service]
-          Type=simple
-          User=$USER
-          WorkingDirectory=/home/$USER/telegram-bot
-          Environment=PATH=/home/$USER/telegram-bot/venv/bin
-          ExecStart=/home/$USER/telegram-bot/venv/bin/python main.py
-          Restart=always
-          RestartSec=10
-          StandardOutput=journal
-          StandardError=journal
-          KillMode=mixed
-          KillSignal=SIGINT
-          TimeoutStopSec=30
-          
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-          
-          # Start the service
-          echo "🚀 Starting service..."
-          sudo systemctl daemon-reload
-          sudo systemctl enable telegram-bot >/dev/null 2>&1
-          sudo systemctl start telegram-bot
-          
-          # Quick status check
-          sleep 3
-          if sudo systemctl is-active --quiet telegram-bot; then
-            echo "✅ Service is running successfully!"
-            sudo systemctl status telegram-bot --no-pager --lines=5
-          else
-            echo "❌ Service failed to start. Logs:"
-            sudo journalctl -u telegram-bot --no-pager -n 10
-          fi
-          
-          echo "🎉 Deployment completed!" 
+
+            cd "$APP_DIR"
+
+            # Create or update environment file
+            cat > .env << EOF
+            TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+            BOT_USERNAME=${{ secrets.BOT_USERNAME }}
+            GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            GEMINI_MODEL=gemini-2.5-flash
+            DATABASE_URL=sqlite:///data/bot_data.db
+            DEFAULT_TEMPERATURE=0.7
+            DEFAULT_TONE=friendly
+            CONTEXT_MESSAGES_COUNT=7
+            DEBUG=false
+            LOG_LEVEL=INFO
+            EOF
+
+            # Ensure we are on the main branch and up-to-date
+            git checkout main
+            git pull origin main --ff-only
+
+            # Build and (re)start the containers
+            docker compose up -d --build 
