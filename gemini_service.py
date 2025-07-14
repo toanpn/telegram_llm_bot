@@ -94,17 +94,34 @@ Response format: JSON only, no additional text.
             # Build context string
             context_str = self._build_context_string(context_messages)
             
-            # Create conversation prompt
+            # Map English tone to Vietnamese descriptions with detailed behaviors
+            tone_mapping = {
+                "friendly": "thân thiện và gần gũi. Hay dùng \"bạn\", \"mình\". Ấm áp, dễ gần.",
+                "professional": "chuyên nghiệp và lịch sự. Dùng \"anh/chị\", \"quý khách\". Trang trọng nhưng thân thiện.",
+                "humorous": "hài hước và vui vẻ. Hay đùa, dùng meme, emoji nhiều. Tạo không khí vui vẻ.",
+                "serious": "nghiêm túc và trang trọng. Ít đùa, tập trung vào vấn đề. Thẳng thắn, rõ ràng.",
+                "flattering": "nịnh nọt và khen ngợi. Luôn gọi thành viên là 'ông chủ', 'bà chủ', 'ngài'. Tự xưng là 'em nhỏ', 'tôi khiêm tốn'. Hay khen ngợi, tâng bốc một cách hài hước.",
+                "casual": "thoải mái và bình dân. Dùng 'mày/tao', 'bro', 'chị em'. Không câu nệ, tự nhiên.",
+                "formal": "hiền triết và sâu sắc. Hay dùng thành ngữ, tục ngữ, câu nói triết lý. Phong cách văn hoa, uyên bác."
+            }
+            
+            vietnamese_tone = tone_mapping.get(tone, "thân thiện và gần gũi")
+            
+            # Create conversation prompt - forcing Vietnamese response
             prompt = f"""
-You are a helpful AI assistant in a Telegram group chat. Your personality should be {tone}.
+Bạn là Huấn, một trợ lý AI hữu ích trong nhóm chat Telegram. Mọi người thường gọi bạn là "thầy Huấn". 
+Tính cách của bạn nên {vietnamese_tone}.
 
-Context from recent messages:
+QUAN TRỌNG: Bạn PHẢI trả lời HOÀN TOÀN bằng tiếng Việt. Không được sử dụng tiếng Anh hoặc ngôn ngữ khác.
+
+Ngữ cảnh từ các tin nhắn gần đây:
 {context_str}
 
-Current message: "{message}"
+Tin nhắn hiện tại: "{message}"
 
-Please respond naturally and helpfully. Keep responses concise but informative.
-Maintain a {tone} tone throughout your response.
+Hãy trả lời một cách tự nhiên và hữu ích bằng tiếng Việt với tư cách là thầy Huấn. 
+Giữ câu trả lời ngắn gọn nhưng đầy đủ thông tin.
+Duy trì giọng điệu {vietnamese_tone} trong suốt câu trả lời của bạn.
 """
             
             # Generate response
@@ -113,7 +130,7 @@ Maintain a {tone} tone throughout your response.
             
         except Exception as e:
             logger.error(f"Error generating response: {e}")
-            return "Sorry, I'm having trouble processing your message right now. Please try again."
+            return "Xin lỗi, tôi đang gặp khó khăn trong việc xử lý tin nhắn của bạn. Vui lòng thử lại."
     
     async def summarize_conversation(self, messages: List[Dict]) -> str:
         """Summarize a conversation from message history."""
@@ -121,20 +138,23 @@ Maintain a {tone} tone throughout your response.
             # Build conversation string
             conversation_str = self._build_conversation_string(messages)
             
-            # Create summarization prompt
+            # Create summarization prompt - forcing Vietnamese response
             prompt = f"""
-Please provide a concise summary of this conversation. Focus on the main topics discussed, key decisions made, and important information shared.
+Hãy cung cấp một tóm tắt ngắn gọn về cuộc trò chuyện này bằng tiếng Việt. 
+Tập trung vào các chủ đề chính được thảo luận, các quyết định quan trọng và thông tin quan trọng được chia sẻ.
 
-Conversation:
+QUAN TRỌNG: Bạn PHẢI trả lời HOÀN TOÀN bằng tiếng Việt. Không được sử dụng tiếng Anh hoặc ngôn ngữ khác.
+
+Cuộc trò chuyện:
 {conversation_str}
 
-Please provide a well-structured summary with:
-1. Main topics discussed
-2. Key points or decisions
-3. Important information shared
-4. Any action items or next steps mentioned
+Hãy cung cấp một tóm tắt có cấu trúc tốt với:
+1. Các chủ đề chính được thảo luận
+2. Các điểm quan trọng hoặc quyết định
+3. Thông tin quan trọng được chia sẻ
+4. Bất kỳ hành động hoặc bước tiếp theo nào được đề cập
 
-Keep the summary clear and informative.
+Giữ tóm tắt rõ ràng và đầy đủ thông tin.
 """
             
             # Generate summary
@@ -143,17 +163,23 @@ Keep the summary clear and informative.
             
         except Exception as e:
             logger.error(f"Error summarizing conversation: {e}")
-            return "Sorry, I couldn't summarize the conversation. Please try again."
+            return "Xin lỗi, tôi không thể tóm tắt cuộc trò chuyện này. Vui lòng thử lại."
     
     async def _generate_response(self, prompt: str, temperature: float = 0.7) -> str:
         """Generate response using Gemini AI."""
         try:
+            # Log the request
+            logger.info(f"🚀 GEMINI REQUEST:")
+            logger.info(f"Temperature: {temperature}")
+            logger.info(f"Prompt: {prompt}")
+            logger.info("=" * 80)
+            
             # Configure generation parameters
             generation_config = genai.types.GenerationConfig(
                 temperature=temperature,
                 top_p=0.8,
                 top_k=40,
-                max_output_tokens=1024,
+                max_output_tokens=2048,  # Increased from 1024 to allow longer responses
             )
             
             # Generate response
@@ -163,7 +189,117 @@ Keep the summary clear and informative.
                 generation_config=generation_config
             )
             
-            return response.text
+            # Log the raw response
+            logger.info(f"📥 GEMINI RAW RESPONSE:")
+            logger.info(f"Response object: {response}")
+            if hasattr(response, 'candidates') and response.candidates:
+                logger.info(f"Candidates count: {len(response.candidates)}")
+                for i, candidate in enumerate(response.candidates):
+                    logger.info(f"Candidate {i}: {candidate}")
+                    if hasattr(candidate, 'finish_reason'):
+                        logger.info(f"Finish reason: {candidate.finish_reason}")
+            logger.info("=" * 80)
+            
+            # Check if response was blocked by safety filters
+            if not response.candidates:
+                error_msg = "Xin lỗi, tôi không thể trả lời câu hỏi này do chính sách an toàn."
+                logger.warning("🚫 Response was blocked by safety filters")
+                logger.info(f"❌ RETURNING ERROR: {error_msg}")
+                return error_msg
+            
+            # Check for finish reason - handle both enum and integer values
+            finish_reason = response.candidates[0].finish_reason
+            reason_name = None
+            reason_value = None
+            
+            if finish_reason:
+                # Handle both enum (with .name) and integer values
+                if hasattr(finish_reason, 'name'):
+                    reason_name = finish_reason.name
+                    reason_value = finish_reason.value if hasattr(finish_reason, 'value') else finish_reason
+                else:
+                    reason_value = finish_reason
+                    # Map integer values to names (based on Gemini API documentation)
+                    reason_names = {
+                        0: "FINISH_REASON_UNSPECIFIED",
+                        1: "STOP",
+                        2: "MAX_TOKENS", 
+                        3: "SAFETY",
+                        4: "RECITATION",
+                        5: "OTHER"
+                    }
+                    reason_name = reason_names.get(reason_value, "UNKNOWN")
+                
+                logger.warning(f"🚦 Response finished with reason: {reason_name} ({reason_value})")
+                
+                # Only return early for SAFETY blocks - for MAX_TOKENS, try to extract partial text
+                if reason_name == "SAFETY":
+                    error_msg = "Xin lỗi, tôi không thể trả lời câu hỏi này do chính sách an toàn."
+                    logger.info(f"❌ SAFETY BLOCK: {error_msg}")
+                    return error_msg
+                elif reason_name == "MAX_TOKENS":
+                    logger.info("⚠️ MAX_TOKENS reached, but will try to extract partial text")
+                    # Continue to text extraction instead of returning error immediately
+            
+            # Handle both simple and complex responses
+            try:
+                # Try to get simple text response first
+                text_response = response.text
+                if text_response and text_response.strip():
+                    final_response = text_response.strip()
+                    logger.info(f"✅ GEMINI FINAL RESPONSE: {final_response}")
+                    return final_response
+                else:
+                    logger.warning("Response text is empty, trying complex extraction")
+                    raise ValueError("Empty response text")
+            except ValueError as e:
+                logger.debug(f"Simple text access failed: {e}")
+                # If response is not simple text, use parts accessor
+                try:
+                    if response.candidates and len(response.candidates) > 0:
+                        candidate = response.candidates[0]
+                        if candidate.content and candidate.content.parts and len(candidate.content.parts) > 0:
+                            part = candidate.content.parts[0]
+                            if hasattr(part, 'text') and part.text and part.text.strip():
+                                final_response = part.text.strip()
+                                logger.info(f"✅ GEMINI FINAL RESPONSE (from complex): {final_response}")
+                                return final_response
+                    
+                    # If we get here, try to extract any text from the response
+                    logger.warning(f"Complex response structure, trying to extract text...")
+                    logger.debug(f"Response candidates: {len(response.candidates) if response.candidates else 0}")
+                    
+                    if response.candidates:
+                        for i, candidate in enumerate(response.candidates):
+                            logger.debug(f"Candidate {i}: {candidate}")
+                            if candidate.content:
+                                logger.debug(f"Content parts: {len(candidate.content.parts) if candidate.content.parts else 0}")
+                                if candidate.content.parts:
+                                    for j, part in enumerate(candidate.content.parts):
+                                        logger.debug(f"Part {j}: {type(part)} - {part}")
+                                        if hasattr(part, 'text') and part.text and part.text.strip():
+                                            final_response = part.text.strip()
+                                            logger.info(f"✅ GEMINI FINAL RESPONSE (from deep search): {final_response}")
+                                            return final_response
+                    
+                    logger.warning("Could not extract text from Gemini response")
+                    logger.debug(f"Full response object: {response}")
+                    
+                    # Check if this was a MAX_TOKENS issue and provide appropriate error
+                    if reason_name == "MAX_TOKENS":
+                        error_msg = "Xin lỗi, câu trả lời quá dài. Vui lòng hỏi câu hỏi ngắn gọn hơn."
+                        logger.info(f"❌ MAX_TOKENS NO TEXT: {error_msg}")
+                        return error_msg
+                    else:
+                        error_msg = "Xin lỗi, tôi không thể tạo ra câu trả lời lúc này. Vui lòng thử lại."
+                        logger.info(f"❌ EXTRACTION FAILED: {error_msg}")
+                        return error_msg
+                
+                except Exception as extract_error:
+                    error_msg = "Xin lỗi, tôi gặp lỗi khi xử lý câu trả lời. Vui lòng thử lại."
+                    logger.error(f"❌ EXTRACTION ERROR: {extract_error}")
+                    logger.info(f"❌ RETURNING ERROR: {error_msg}")
+                    return error_msg
             
         except Exception as e:
             logger.error(f"Error generating AI response: {e}")
