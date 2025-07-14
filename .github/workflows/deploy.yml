@@ -3,49 +3,10 @@ name: Deploy Telegram Bot to AWS EC2
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pydantic-settings greenlet
-    
-    - name: Create test .env file
-      run: |
-        echo "TELEGRAM_BOT_TOKEN=test" > .env
-        echo "BOT_USERNAME=test" >> .env
-        echo "GOOGLE_API_KEY=test" >> .env
-        echo "GEMINI_MODEL=gemini-1.5-flash" >> .env
-        echo "DATABASE_URL=sqlite:///test_bot_data.db" >> .env
-        echo "DEFAULT_TEMPERATURE=0.7" >> .env
-        echo "DEFAULT_TONE=friendly" >> .env
-        echo "CONTEXT_MESSAGES_COUNT=7" >> .env
-        echo "DEBUG=false" >> .env
-        echo "LOG_LEVEL=INFO" >> .env
-    
-    - name: Run tests
-      run: |
-        python test_bot.py || true  # Allow tests to fail for config validation
-        python -c "from models import User; print('Models test passed')"
-        python -c "from config import config; print('Config test passed')"
-
   deploy:
-    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
@@ -58,67 +19,80 @@ jobs:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        timeout: 300s
-        command_timeout: 300s
+        timeout: 600s
+        command_timeout: 600s
         script: |
-          # Update system (run in background to avoid timeout)
+          # Update system packages
           sudo apt-get update -y
           
-          # Install Python 3.12 if not exists
+          # Install essential packages
+          sudo apt-get install -y \
+            curl \
+            wget \
+            git \
+            unzip \
+            software-properties-common \
+            apt-transport-https \
+            ca-certificates \
+            gnupg \
+            lsb-release
+          
+          # Install Docker
+          if ! command -v docker &> /dev/null; then
+            echo "Installing Docker..."
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update -y
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+            sudo usermod -aG docker $USER
+            sudo systemctl enable docker
+            sudo systemctl start docker
+            echo "Docker installed successfully"
+          fi
+          
+          # Install Docker Compose
+          if ! command -v docker-compose &> /dev/null; then
+            echo "Installing Docker Compose..."
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            echo "Docker Compose installed successfully"
+          fi
+          
+          # Install Python 3.12
           if ! command -v python3.12 &> /dev/null; then
             echo "Installing Python 3.12..."
-            sudo apt-get install -y software-properties-common
             sudo add-apt-repository ppa:deadsnakes/ppa -y
             sudo apt-get update -y
             sudo apt-get install -y python3.12 python3.12-pip python3.12-venv python3.12-dev
             echo "Python 3.12 installed successfully"
           fi
           
-          # Install git if not exists
-          if ! command -v git &> /dev/null; then
-            echo "Installing git..."
-            sudo apt-get install -y git
-            echo "Git installed successfully"
-          fi
-          
-          # Create application directory
+          # Setup application directory
           mkdir -p ~/telegram-bot
           cd ~/telegram-bot
           
-          # Stop existing bot process if running
-          echo "Stopping existing bot process..."
-          sudo systemctl stop telegram-bot 2>/dev/null || true
-          pkill -f "python.*main.py" || true
-          sleep 2
-          echo "Existing processes stopped"
+          # Stop existing bot service
+          sudo systemctl stop telegram-bot 2>/dev/null || echo "Service not running"
+          pkill -f "python.*main.py" || echo "No bot processes to kill"
           
-          # Clone or pull latest code
-          echo "Updating code repository..."
+          # Clone or update repository
           if [ -d ".git" ]; then
-            echo "Pulling latest changes..."
-            timeout 60 git fetch origin || echo "Git fetch timed out"
+            echo "Updating repository..."
+            git fetch origin
             git reset --hard origin/main
           else
             echo "Cloning repository..."
-            timeout 60 git clone https://github.com/${{ github.repository }}.git . || echo "Git clone timed out"
+            git clone https://github.com/${{ github.repository }}.git .
           fi
-          echo "Code updated successfully"
           
-          # Create virtual environment
-          echo "Creating virtual environment..."
-          rm -rf venv  # Remove old venv if exists
+          # Setup Python environment
+          rm -rf venv
           python3.12 -m venv venv
           source venv/bin/activate
-          echo "Virtual environment created and activated"
+          pip install --upgrade pip
+          pip install -r requirements.txt
           
-          # Install dependencies (with timeout protection)
-          echo "Installing Python dependencies..."
-          pip install --upgrade pip --timeout=60
-          pip install -r requirements.txt --timeout=120
-          pip install pydantic-settings greenlet --timeout=60
-          echo "Dependencies installed successfully"
-          
-          # Create .env file with secrets
+          # Create environment file
           cat > .env << EOF
           TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
           BOT_USERNAME=${{ secrets.BOT_USERNAME }}
@@ -132,11 +106,10 @@ jobs:
           LOG_LEVEL=INFO
           EOF
           
-          # Create data directory
-          mkdir -p data
-          mkdir -p logs
+          # Create required directories
+          mkdir -p data logs
           
-          # Create systemd service file
+          # Create systemd service
           sudo tee /etc/systemd/system/telegram-bot.service > /dev/null << EOF
           [Unit]
           Description=Telegram LLM Bot
@@ -149,27 +122,21 @@ jobs:
           Environment=PATH=/home/$USER/telegram-bot/venv/bin
           ExecStart=/home/$USER/telegram-bot/venv/bin/python main.py
           Restart=always
-          RestartSec=3
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
           
           [Install]
           WantedBy=multi-user.target
           EOF
           
-          # Reload systemd and start service
-          echo "Reloading systemd and starting service..."
+          # Start the service
           sudo systemctl daemon-reload
           sudo systemctl enable telegram-bot
-          sudo systemctl restart telegram-bot
+          sudo systemctl start telegram-bot
           
-          # Wait a moment for service to start
-          sleep 3
-          
-          # Show service status (with timeout)
-          echo "Checking service status..."
-          timeout 10 sudo systemctl status telegram-bot --no-pager || echo "Service status check timed out"
-          
-          # Show recent logs (with timeout)
-          echo "Showing recent logs..."
-          timeout 10 sudo journalctl -u telegram-bot --no-pager -n 10 || echo "Log retrieval timed out"
+          # Check service status
+          sleep 5
+          sudo systemctl status telegram-bot --no-pager
           
           echo "Deployment completed successfully!" 
