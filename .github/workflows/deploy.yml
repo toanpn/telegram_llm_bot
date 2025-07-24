@@ -20,8 +20,24 @@ jobs:
           # Install sshpass for testing
           sudo apt-get update && sudo apt-get install -y sshpass
           
-          # Test SSH connection
-          if sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -p "${{ secrets.VPS_PORT }}" -o ConnectTimeout=30 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} "echo 'SSH test successful'"; then
+          echo "Debug info:"
+          echo "- Host: ${{ secrets.VPS_HOST }}"
+          echo "- Port: ${{ secrets.VPS_PORT }}"
+          echo "- Username: ${{ secrets.VPS_USERNAME }}"
+          echo "- Testing connectivity..."
+          
+          # Test basic connectivity first
+          echo "Testing if host is reachable..."
+          if timeout 10 bash -c "</dev/tcp/${{ secrets.VPS_HOST }}/${{ secrets.VPS_PORT }}"; then
+            echo "✅ Port ${{ secrets.VPS_PORT }} is reachable on ${{ secrets.VPS_HOST }}"
+          else
+            echo "❌ Cannot reach ${{ secrets.VPS_HOST }}:${{ secrets.VPS_PORT }}"
+            echo "This could be a firewall, network, or incorrect host/port issue"
+          fi
+          
+          # Test SSH connection with verbose output
+          echo "Testing SSH authentication..."
+          if sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh -v -p "${{ secrets.VPS_PORT }}" -o ConnectTimeout=30 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} "echo 'SSH test successful'" 2>&1; then
             echo "✅ SSH connection test passed"
           else
             echo "❌ SSH connection test failed"
@@ -30,6 +46,7 @@ jobs:
             echo "2. SSH port ${{ secrets.VPS_PORT }} is open"
             echo "3. Password authentication is enabled on VPS"
             echo "4. Root login is permitted (if using root user)"
+            echo "5. Correct password in VPS_PASSWORD secret"
             exit 1
           fi
 
