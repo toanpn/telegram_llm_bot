@@ -1,4 +1,4 @@
-name: Simple Deploy
+name: Deploy Telegram Bot to VPS
 
 on:
   push:
@@ -14,31 +14,60 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy to server via SSH
+      - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
           script: |
             set -e
 
+            echo "🚀 Starting deployment to VPS..."
+
             # Directory where the application should live
-            APP_DIR=~/telegram-bot
+            APP_DIR=/opt/telegram-bot
+
+            # Install Docker and Docker Compose if not exists
+            if ! command -v docker &> /dev/null; then
+              echo "📦 Installing Docker..."
+              apt-get update
+              apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+              add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              apt-get update
+              apt-get install -y docker-ce docker-ce-cli containerd.io
+              systemctl start docker
+              systemctl enable docker
+              echo "✅ Docker installed successfully"
+            fi
+
+            if ! command -v docker-compose &> /dev/null; then
+              echo "📦 Installing Docker Compose..."
+              curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              chmod +x /usr/local/bin/docker-compose
+              echo "✅ Docker Compose installed successfully"
+            fi
+
+            # Create application directory
+            mkdir -p "$APP_DIR"
 
             # Clone repo if it does not exist yet
             if [ ! -d "$APP_DIR/.git" ]; then
+              echo "📥 Cloning repository..."
               git clone https://github.com/${{ github.repository }} "$APP_DIR"
             fi
 
             cd "$APP_DIR"
 
             # Create or update environment file
+            echo "⚙️  Creating environment configuration..."
             cat > .env << EOF
             TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
             BOT_USERNAME=${{ secrets.BOT_USERNAME }}
             GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-            GEMINI_MODEL=gemini-2.5-flash
+            GEMINI_MODEL=gemini-1.5-flash
             DATABASE_URL=sqlite:///data/bot_data.db
             DEFAULT_TEMPERATURE=0.7
             DEFAULT_TONE=friendly
@@ -48,8 +77,27 @@ jobs:
             EOF
 
             # Ensure we are on the main branch and up-to-date
+            echo "🔄 Updating code..."
+            git fetch origin
             git checkout main
-            git pull origin main --ff-only
+            git reset --hard origin/main
 
-            # Build and (re)start the containers
-            docker compose up -d --build 
+            # Stop existing containers
+            echo "🛑 Stopping existing containers..."
+            docker-compose down || true
+
+            # Build and start the containers
+            echo "🏗️  Building and starting containers..."
+            docker-compose up -d --build
+
+            # Wait a moment for containers to start
+            sleep 10
+
+            # Show status
+            echo "📊 Deployment completed! Container status:"
+            docker-compose ps
+
+            echo "📝 Recent logs:"
+            docker-compose logs --tail=20
+
+            echo "✅ Telegram bot deployed successfully!" 
