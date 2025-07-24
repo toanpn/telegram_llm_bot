@@ -253,7 +253,7 @@ Giữ tóm tắt rõ ràng và đầy đủ thông tin.
                     logger.warning("Response text is empty, trying complex extraction")
                     raise ValueError("Empty response text")
             except ValueError as e:
-                logger.debug(f"Simple text access failed: {e}")
+
                 # If response is not simple text, use parts accessor
                 try:
                     if response.candidates and len(response.candidates) > 0:
@@ -267,16 +267,13 @@ Giữ tóm tắt rõ ràng và đầy đủ thông tin.
                     
                     # If we get here, try to extract any text from the response
                     logger.warning(f"Complex response structure, trying to extract text...")
-                    logger.debug(f"Response candidates: {len(response.candidates) if response.candidates else 0}")
+
                     
                     if response.candidates:
                         for i, candidate in enumerate(response.candidates):
-                            logger.debug(f"Candidate {i}: {candidate}")
                             if candidate.content:
-                                logger.debug(f"Content parts: {len(candidate.content.parts) if candidate.content.parts else 0}")
                                 if candidate.content.parts:
                                     for j, part in enumerate(candidate.content.parts):
-                                        logger.debug(f"Part {j}: {type(part)} - {part}")
                                         if hasattr(part, 'text') and part.text and part.text.strip():
                                             final_response = part.text.strip()
                                             logger.info(f"✅ GEMINI FINAL RESPONSE (from deep search): {final_response}")

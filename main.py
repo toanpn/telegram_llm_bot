@@ -24,31 +24,51 @@ class TelegramBot:
     """Main Telegram bot class."""
     
     def __init__(self):
+        # Validate configuration first
+        validate_config()
+        
         self.application = None
         self.db_service = None
         self.gemini_service = None
         
-    async def initialize(self):
-        """Initialize the bot with all services."""
-        # Validate configuration
-        validate_config()
+        # Initialize everything synchronously
+        self._setup()
         
-        # Initialize services
-        self.db_service = DatabaseService()
-        await self.db_service.initialize()
-        
-        self.gemini_service = GeminiService()
-        
-        # Create Telegram application
-        self.application = Application.builder().token(config.telegram_bot_token).build()
-        
-        # Verify bot information
-        await self._verify_bot_info()
-        
-        # Add handlers
-        self._add_handlers()
-        
-        logger.info("Bot initialized successfully")
+    def _setup(self):
+        """Set up all components synchronously."""
+        try:
+            # Initialize services (we'll need to make these sync or handle differently)
+            self.db_service = DatabaseService()
+            self.gemini_service = GeminiService()
+            
+            # Setup the application with post_init for async operations
+            self.application = (Application.builder()
+                              .token(config.telegram_bot_token)
+                              .post_init(self.post_init)
+                              .build())
+            
+            # Add handlers
+            self._add_handlers()
+            
+            logger.info("Bot setup complete")
+            
+        except Exception as e:
+            logger.error(f"Error during bot setup: {e}")
+            raise
+    
+    async def post_init(self, application: Application) -> None:
+        """Called after the application is initialized. This is the proper place for async setup."""
+        try:
+            # Initialize database service asynchronously  
+            await self.db_service.initialize()
+            
+            # Verify bot information
+            await self._verify_bot_info()
+            
+            logger.info("Bot async initialization complete")
+        except Exception as e:
+            logger.error(f"Error during async initialization: {e}")
+            raise
     
     async def _verify_bot_info(self):
         """Verify bot information and log for debugging."""
@@ -112,7 +132,7 @@ class TelegramBot:
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
         
-        logger.debug(f"Processing group message from user {user_id} in chat {chat_id}")
+
         
         try:
             # Ensure user exists in database
@@ -136,7 +156,7 @@ class TelegramBot:
             
             # Check if bot should respond
             should_respond = await self._should_respond_to_message(update, context)
-            logger.debug(f"Should respond to message: {should_respond}")
+
             
             if should_respond:
                 logger.info(f"Bot responding to message: {message.text[:50]}...")
@@ -171,8 +191,7 @@ class TelegramBot:
                     logger.info("Bot response sent successfully")
                 else:
                     logger.warning("AI processing returned empty response")
-            else:
-                logger.debug("Bot will not respond to this message")
+            # If we shouldn't respond, just continue without action
                 
         except Exception as e:
             logger.error(f"Error handling group message: {e}")
@@ -198,41 +217,34 @@ class TelegramBot:
         """Determine if the bot should respond to a message."""
         message = update.message
         
-        # Log for debugging
-        logger.debug(f"Checking if should respond to message: {message.text[:50]}...")
+
         
         # Check if bot is mentioned using entities
         if message.entities:
             for entity in message.entities:
                 if entity.type == "mention":
                     mentioned_username = message.text[entity.offset:entity.offset + entity.length]
-                    logger.debug(f"Found mention: {mentioned_username}")
                     if mentioned_username == f"@{config.bot_username}":
-                        logger.debug("Bot mentioned via @username")
                         return True
                 elif entity.type == "text_mention":
                     # Handle text mentions (when user doesn't have username)
                     if hasattr(entity, 'user') and entity.user.id == context.bot.id:
-                        logger.debug("Bot mentioned via text mention")
                         return True
         
         # Check if bot username is mentioned anywhere in the message (case insensitive)
         if config.bot_username and config.bot_username.lower() in message.text.lower():
-            logger.debug("Bot username found in message text")
             return True
         
         # Check if this is a reply to bot's message
         if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
-            logger.debug("Message is reply to bot")
             return True
         
         # Check if message starts with bot's first name (common way to address bots)
         bot_me = await context.bot.get_me()
         if bot_me.first_name and bot_me.first_name.lower() in message.text.lower():
-            logger.debug("Bot first name found in message")
             return True
         
-        logger.debug("Should not respond to this message")
+
         return False
     
     async def _process_with_ai(self, message: str, context_messages: List[Dict], user_id: int, chat_id: int) -> Optional[str]:
@@ -688,69 +700,72 @@ class TelegramBot:
             logger.error(f"Error updating setting: {e}")
             await query.edit_message_text("❌ Lỗi khi cập nhật cài đặt. Vui lòng thử lại.")
     
-    async def run(self):
-        """Run the bot."""
-        try:
-            # Initialize the bot
-            await self.initialize()
-            
-            logger.info("Starting bot...")
-            # Use the asynchronous run_polling method
-            await self.application.run_polling(allowed_updates=Update.ALL_TYPES)
-        except Exception as e:
-            logger.error(f"Error running bot: {e}")
-            raise
-        finally:
-            # Ensure proper cleanup
-            if self.application.running:
+    async def shutdown(self):
+        """Gracefully shutdown the bot."""
+        logger.info("Shutting down bot...")
+        
+        if self.application:
+            try:
+                logger.info("Stopping application...")
                 await self.application.stop()
-                await self.application.shutdown()
+                logger.info("Application stopped successfully")
+            except Exception as e:
+                logger.error(f"Error during application shutdown: {e}")
+        
+        logger.info("Bot shutdown complete")
+    
 
-async def main():
-    """Main function to run the bot."""
-    # Configure logging
+
+# Global variable to hold bot instance for signal handler
+bot_instance = None
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals."""
+    logger.info(f"Received signal {signum}, initiating shutdown...")
+    if bot_instance and bot_instance.application:
+        # Stop the application gracefully
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(bot_instance.application.stop())
+            else:
+                asyncio.run(bot_instance.shutdown())
+        except Exception as e:
+            logger.error(f"Error in signal handler: {e}")
+            # Force exit if graceful shutdown fails
+            import sys
+            sys.exit(1)
+
+def main():
+    """Main function to setup and run the bot."""
+    global bot_instance
+    
+    # Configure logging - only show WARNING and ERROR messages
     logging.basicConfig(
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=getattr(logging, config.log_level.upper())
+        level=logging.WARNING
     )
     
-    # Create bot instance
-    bot = TelegramBot()
-    
-    # Setup signal handlers for graceful shutdown
-    def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, shutting down gracefully...")
-        # Create a task to stop the bot
-        asyncio.create_task(shutdown_bot(bot))
-    
-    # Setup signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     try:
-        # Run bot
-        await bot.run()
+        # Create bot instance
+        bot_instance = TelegramBot()
+        
+        # Setup signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+
+        
+        # Run bot - this manages its own asyncio context
+        bot_instance.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+    except KeyboardInterrupt:
+        pass  # Silent shutdown
     except Exception as e:
         logger.error(f"Bot error: {e}")
         raise
     finally:
         logger.info("Bot shutdown complete")
 
-async def shutdown_bot(bot):
-    """Gracefully shutdown the bot."""
-    try:
-        if bot.application and bot.application.running:
-            await bot.application.stop()
-            await bot.application.shutdown()
-            logger.info("Bot stopped successfully")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
-
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
-        raise 
+    main() 
