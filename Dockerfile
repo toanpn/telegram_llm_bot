@@ -25,9 +25,6 @@ COPY . .
 # Create directory for database
 RUN mkdir -p /app/data
 
-# Set environment for database location
-ENV DATABASE_URL=sqlite:///data/bot_data.db
-
 # Create non-root user for security
 RUN adduser --disabled-password --gecos '' appuser
 RUN chown -R appuser:appuser /app
